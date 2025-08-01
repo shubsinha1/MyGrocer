@@ -3,32 +3,27 @@ from tkinter import ttk
 from PIL import Image, ImageTk
 import mysql.connector
 from tkinter.simpledialog import askinteger
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+import os
+from datetime import datetime
+import tkinter.filedialog as fd
+import pathlib
 
-# Function to connect to MySQL database
+#  connect to MySQL database
 def connect_db():
     conn = mysql.connector.connect(
-        host="localhost",         # Change to your MySQL host if needed
+        host="localhost",         
         user="root",              # MySQL username
         password="shub12345", # MySQL password
         database="grocery_store"  # Database name
     )
     return conn
 
-# Function to create bills table if not exists
-def create_bills_table():
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS bills (
-                        id INT AUTO_INCREMENT PRIMARY KEY,
-                        item_name VARCHAR(255) NOT NULL,
-                        quantity INT NOT NULL,
-                        price DECIMAL(10, 2) NOT NULL,
-                        total_price DECIMAL(10, 2) NOT NULL,
-                        bill_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
-    conn.commit()
-    conn.close()
 
-# Function to insert bill data into the bills table
 def insert_bill_data(SELECT_ITEM, QUANTITY, PRICE, TOTAL_PRICE):
     conn = connect_db()
     cursor = conn.cursor()
@@ -37,355 +32,7 @@ def insert_bill_data(SELECT_ITEM, QUANTITY, PRICE, TOTAL_PRICE):
     conn.commit()
     conn.close()
 
-# Function to open the "Generate Bill" window
-def open_generate_bill_window():
-    bill_window = tk.Toplevel(root)
-    bill_window.title("Generate Bill")
-    
-    # Get screen dimensions for full-screen window
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    bill_window.geometry(f"{screen_width}x{screen_height}")
 
-    # Background color for aesthetic
-    bill_window.configure(bg="#f8f8f8")
-
-    # Title Label
-    title_label = tk.Label(
-        bill_window, text="Grocery Billing System", font=("Al", 30, "bold"), bg="#f8f8f8", fg="#333"
-    )
-    title_label.pack(pady=20)
-
-    # Frame for the grocery input interface
-    interface_frame = tk.Frame(bill_window, bg="#fefefe", relief="groove", bd=2)
-    interface_frame.pack(pady=20, padx=20, fill="both", expand=True)
-
-    # Labels for item name, quantity, and price
-    tk.Label(interface_frame, text="SELECT ITEM", font=("Helvetica", 16), bg="#fefefe").grid(row=0, column=0, padx=10, pady=10)
-    tk.Label(interface_frame, text="Quantity(Kg/Unit)", font=("Helvetica", 16), bg="#fefefe").grid(row=0, column=1, padx=10, pady=10)
-    tk.Label(interface_frame, text="Price (per Kg/Unit)", font=("Helvetica", 16), bg="#fefefe").grid(row=0, column=2, padx=10, pady=10)
-
-    # Fetch inventory data for dropdown
-    inventory_data = fetch_inventory_data()
-    inventory_names = [item['product_name'] for item in inventory_data]
-
-    # Replace item_name_entry with a Combobox
-    item_name_var = tk.StringVar()
-    item_name_combobox = ttk.Combobox(interface_frame, textvariable=item_name_var, values=inventory_names, font=("Helvetica", 14), width=18, state="readonly")
-    item_name_combobox.grid(row=1, column=0, padx=10, pady=10)
-
-    # Add spinbox for quantity
-    quantity_var = tk.StringVar(value="1")
-    quantity_spinbox = ttk.Spinbox(
-        interface_frame,
-        from_=1,
-        to=999,
-        textvariable=quantity_var,
-        width=8,
-        font=("Helvetica", 14)
-    )
-    quantity_spinbox.grid(row=1, column=1, padx=10, pady=10)
-
-    # Price entry remains the same (auto-filled)
-    price_entry = tk.Entry(interface_frame, font=("Helvetica", 14), borderwidth=5, width=10)
-    price_entry.grid(row=1, column=2, padx=10, pady=10)
-
-    # When an item is selected, auto-fill the price_entry
-    def on_item_selected(event):
-        selected_item = item_name_var.get()
-        for item in inventory_data:
-            if item['product_name'] == selected_item:
-                price_entry.delete(0, tk.END)
-                price_entry.insert(0, str(item['price']))
-                break
-    item_name_combobox.bind("<<ComboboxSelected>>", on_item_selected)
-
-    # Add to cart button
-    def add_to_cart():
-        item = item_name_var.get()
-        quantity = quantity_var.get()
-        price = price_entry.get()
-
-        if item and quantity and price:
-            try:
-                quantity = int(quantity)
-                price = float(price)
-                total_price = quantity * price
-                cart.insert("", "end", values=(item, quantity, price, total_price))
-                item_name_combobox.set("")
-                quantity_var.set("1")  # Reset quantity to 1
-                price_entry.delete(0, tk.END)
-            except ValueError:
-                print("Invalid quantity or price entered.")
-
-    add_to_cart_button = tk.Button(interface_frame, text="Add to Cart", font=("Helvetica", 14), command=add_to_cart)
-    add_to_cart_button.grid(row=1, column=3, padx=10, pady=10)
-    
-    #close_button=tk.Button(interface_frame,text="Close",font=("Lobster",20),command=interface_frame.destroy())
-    #close_button.pack(pady=15, side="bottom")
-    
-    # Cart display
-    cart_label = tk.Label(interface_frame, text="Cart", font=("Algerian", 30, "bold"), bg="#fefefe")
-    cart_label.grid(row=2, column=0, columnspan=4, pady=10)
-
-    # Treeview for displaying cart items
-    cart = ttk.Treeview(interface_frame, columns=("Item", "Quantity(Unit/Kg)", "Price", "Total"), show="headings", height=15)
-    cart.heading("Item", text="Item")
-    cart.heading("Quantity(Unit/Kg)", text="Quantity(Unit/Kg)")
-    cart.heading("Price", text="Price (per Unit/Kg)")
-    cart.heading("Total", text="Total Price")
-     # Configure column widths and alignment
-    cart.column("Item", width=250, anchor="w")
-    cart.column("Quantity(Unit/Kg)", width=200, anchor="center")
-    cart.column("Price", width=200, anchor="e")
-    cart.column("Total", width=200, anchor="e")
-    cart.grid(row=3, column=0, columnspan=4, padx=10, pady=10)
-
-    # Label to display the total sum
-    
-
-    # Generate Bill button
-    def generate_bill():
-        total_sum = 0
-        for item in cart.get_children():
-            total_sum += float(cart.item(item, "values")[3])  # Sum up the "Total Price" column
-        title_label.config(text=f"Total: ₹{total_sum:.2f}")
-
-        generate_bill_button = tk.Button(
-        bill_window, text="Generate Bill", font=("Helvetica", 16), bg="#4CAF50", fg="white", command=generate_bill
-    )
-        generate_bill_button.pack(pady=10, side="bottom")
-
-    # --- Create Bill Button ---
-    def create_bill():
-        # Create a new window for the bill
-        bill_display_window = tk.Toplevel(bill_window)
-        bill_display_window.title("Your Bill")
-        bill_display_window.geometry("600x700")
-        bill_display_window.configure(bg="#ffffff")
-
-        # Title for the bill
-        bill_title = tk.Label(
-            bill_display_window, text="Your Grocery Bill", font=("Helvetica", 24, "bold"), bg="#ffffff", fg="#333"
-        )
-        bill_title.pack(pady=10)
-
-        # Bill frame
-        bill_frame = tk.Frame(bill_display_window, bg="#ffffff")
-        bill_frame.pack(padx=20, pady=20, fill="both", expand=True)
-
-        # Display items in the bill
-        tk.Label(bill_frame, text="Item", font=("Helvetica", 16, "bold"), bg="#ffffff").grid(row=0, column=0, padx=10, pady=5)
-        tk.Label(bill_frame, text="Quantity", font=("Helvetica", 16, "bold"), bg="#ffffff").grid(row=0, column=1, padx=10, pady=5)
-        tk.Label(bill_frame, text="Price per Unit", font=("Helvetica", 16, "bold"), bg="#ffffff").grid(row=0, column=2, padx=10, pady=5)
-        tk.Label(bill_frame, text="Total Price", font=("Helvetica", 16, "bold"), bg="#ffffff").grid(row=0, column=3, padx=10, pady=5)
-
-        # Add cart items to the bill
-        total_sum = 0
-        bill_lines = []
-        for index, item in enumerate(cart.get_children()):
-            values = cart.item(item, "values")
-            tk.Label(bill_frame, text=values[0], font=("Helvetica", 14), bg="#ffffff").grid(row=index + 1, column=0, padx=10, pady=5)
-            tk.Label(bill_frame, text=values[1], font=("Helvetica", 14), bg="#ffffff").grid(row=index + 1, column=1, padx=10, pady=5)
-            tk.Label(bill_frame, text=f"₹{values[2]}", font=("Helvetica", 14), bg="#ffffff").grid(row=index + 1, column=2, padx=10, pady=5)
-            tk.Label(bill_frame, text=f"₹{values[3]}", font=("Helvetica", 14), bg="#ffffff").grid(row=index + 1, column=3, padx=10, pady=5)
-            total_sum += float(values[3])
-            bill_lines.append(f"{values[0]}\t{values[1]}\t₹{values[2]}\t₹{values[3]}")
-
-        # Display the total sum
-        tk.Label(bill_display_window, text=f"Grand Total: ₹{total_sum:.2f}", font=("Helvetica", 18, "bold"), bg="#ffffff", fg="#333").pack(pady=10)
-
-        # Print Bill function
-        def print_bill():
-            import tkinter.filedialog as fd
-            from reportlab.lib.pagesizes import letter
-            from reportlab.pdfgen import canvas as pdf_canvas
-            from reportlab.lib import colors
-            
-            file_path = fd.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")], title="Save Bill As PDF")
-            if file_path:
-                c = pdf_canvas.Canvas(file_path, pagesize=letter)
-                width, height = letter
-
-                # Add header with light blue background
-                c.setFillColor(colors.lightblue)
-                c.rect(0, height-120, width, 120, fill=True)
-                
-                # Add store name
-                c.setFillColor(colors.darkblue)
-                c.setFont("Helvetica-Bold", 36)
-                c.drawString(50, height-50, "MyGrocer")
-                
-                # Add decorative line
-                c.setStrokeColor(colors.darkblue)
-                c.setLineWidth(2)
-                c.line(50, height-60, width-50, height-60)
-                
-                # Add bill title and date
-                c.setFillColor(colors.black)
-                c.setFont("Helvetica-Bold", 24)
-                c.drawString(50, height-100, "INVOICE")
-                
-                from datetime import datetime
-                current_date = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
-                c.setFont("Helvetica", 12)
-                c.drawString(width-200, height-100, f"Date: {current_date}")
-
-                # Calculate text field height based on number of items (minimum 400)
-                items_count = len(bill_lines)
-                field_height = max(400, items_count * 25 + 150)  # Increased padding
-                
-                # Define column positions
-                item_x = 70
-                qty_x = 250
-                price_x = 380
-                total_x = 480
-
-                # Calculate vertical positions for better centering
-                total_page_height = height  # total height of the page
-                header_height = 120  # height of the blue header
-                footer_height = 150  # approximate height needed for footer
-                available_height = total_page_height - header_height - footer_height
-                
-                # Position the field in the center of available space
-                field_start_y = height - header_height - 50 - ((available_height - field_height) / 2)
-
-                # Draw text field background
-                c.setFillColor(colors.lightgrey)
-                c.rect(50, field_start_y-field_height, width-100, field_height, fill=True)
-                
-                # Add field border
-                c.setStrokeColor(colors.grey)
-                c.setLineWidth(1)
-                c.rect(50, field_start_y-field_height, width-100, field_height, stroke=True)
-
-                # Add headers (adjusted position)
-                y = field_start_y - 40
-                c.setFillColor(colors.black)
-                c.setFont("Helvetica-Bold", 14)
-                c.drawString(item_x, y, "Item")
-                c.drawString(qty_x, y, "Quantity")
-                c.drawString(price_x, y, "Price")
-                c.drawString(total_x, y, "Total")
-                
-                # Add separator line
-                y -= 10
-                c.line(70, y, width-70, y)
-                
-                # Add items
-                y -= 25
-                c.setFont("Helvetica", 12)
-                for line in bill_lines:
-                    parts = line.split("\t")
-                    if len(parts) == 4:
-                        # Clean and format the data
-                        item = parts[0].strip()
-                        qty = parts[1].strip()
-                        # Remove any existing currency symbols and clean the data
-                        price = parts[2].replace('₹', '').replace('', '').strip()
-                        total = parts[3].replace('₹', '').replace('', '').strip()
-                        
-                        # Draw each column with proper alignment
-                        c.drawString(item_x, y, item)  # Left align item name
-                        c.drawRightString(qty_x + 80, y, qty)  # Right align quantity
-                        
-                        # Add price with rupee symbol
-                        price_text = f"₹ {price}"
-                        c.drawRightString(price_x + 80, y, price_text)
-                        
-                        # Add total with rupee symbol
-                        total_text = f"₹ {total}"
-                        c.drawRightString(total_x + 60, y, total_text)
-                        
-                        y -= 25
-
-                # Add separator line before total
-                y -= 10
-                c.setStrokeColor(colors.black)
-                c.line(70, y, width-70, y)
-                
-                # Add total with proper alignment and rupee symbol
-                y -= 30
-                c.setFont("Helvetica-Bold", 14)
-                c.drawString(item_x, y, "Grand Total:")
-                grand_total_text = f"₹ {total_sum:.2f}"
-                c.drawRightString(total_x + 60, y, grand_total_text)
-
-                # Add footer (adjusted position)
-                y = 100
-                c.setFillColor(colors.grey)
-                c.setFont("Helvetica", 12)
-                c.drawString(50, y, "Thanks for Visiting!")
-                y -= 20
-                c.drawString(50, y, "Store Address: Diwan Mohalla, Sarvoday Colony")
-                y -= 20
-                c.drawString(50, y, "MyGrocer")
-                y -= 20
-                c.drawString(50, y, "Patna, Bihar")
-                
-                
-                
-                c.save()
-
-        # Print Bill button
-        print_button = tk.Button(
-            bill_display_window, text="Print Bill", font=("Helvetica", 14), bg="#2196F3", fg="white", command=print_bill
-        )
-        print_button.pack(pady=10)
-
-        # Close button
-        close_button = tk.Button(
-            bill_display_window, text="Close", font=("Helvetica", 14), bg="#f44336", fg="white", command=bill_display_window.destroy
-        )
-        close_button.pack(pady=10)
-
-    # Create Bill button directly below the cart
-    create_bill_button = tk.Button(interface_frame, text="Create Bill", font=("Helvetica", 16), bg="#4CAF50", fg="white", command=create_bill)
-    create_bill_button.grid(row=4, column=0, columnspan=4, pady=10)
-
-
-# Function to open the options window
-def open_new_window():
-    
-    new_window = tk.Toplevel(root)
-    new_window.title("Options")
-    
-    # Get the screen size
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    new_window.geometry(f"{screen_width}x{screen_height}")
-
-    # Open the background image and resize it to fit the screen
-    background_image = Image.open(r"C:/GMS/latest groc/grocery_store.jpg")
-    background_image = background_image.resize((screen_width, screen_height))
-    
-    # Convert image for Tkinter compatibility
-    background_image_tk = ImageTk.PhotoImage(background_image)
-
-    # Create a canvas and add the background image
-    canvas = tk.Canvas(new_window, width=screen_width, height=screen_height)
-    canvas.pack(fill="both", expand=True)
-    
-    # Display the image on the canvas
-    canvas.create_image(0, 0, image=background_image_tk, anchor="nw")
-    
-    # Store the image object to prevent it from being garbage collected
-    canvas.image = background_image_tk
-
-    # Button to generate bill
-    generate_bill_button = tk.Button(new_window, text="GENERATE BILL", font=("Lobster", 30), bg="#4CAF50", fg="white", width=30,borderwidth=10, command=open_generate_bill_window)
-    canvas.create_window(screen_width // 2, 300, window=generate_bill_button)
-
-    # Button to open inventory window
-    inventory_button = tk.Button(new_window, text="OPEN INVENTORY", font=("Helvetica", 30), bg="#4CAF50", fg="white", width=30,borderwidth=10, command=open_inventory_window)
-    canvas.create_window(screen_width // 2, 450, window=inventory_button)
-
-    # Add Item button
-    add_button = tk.Button(new_window, text="ADD NEW ITEM TO INVENTORY", font=("Helvetica", 30), bg="#4CAF50", fg="white", width=30,borderwidth=10, command=add_items_to_stock_window)
-    canvas.create_window(screen_width // 2, 600, window=add_button)
-
-
-# Function to create inventory table if not exists
 def create_inventory_table():
     conn = connect_db()
     cursor = conn.cursor()
@@ -397,117 +44,22 @@ def create_inventory_table():
     conn.commit()
     conn.close()
 
-# Function to fetch inventory data from the database
+
 def fetch_inventory_data():
     conn = connect_db()
-    cursor = conn.cursor(dictionary=True)  # This ensures rows are returned as dictionaries
-    cursor.execute("SELECT * FROM inventory ORDER BY stock ASC")  # Sorted by stock in ascending order
-    inventory_data = cursor.fetchall()  # Fetch all rows
+    cursor = conn.cursor(dictionary=True)  
+    cursor.execute("SELECT * FROM inventory ORDER BY stock ASC")  
+    inventory_data = cursor.fetchall() 
     conn.close()
-    return inventory_data  # Return the fetched inventory data
+    return inventory_data 
 
 
-
-# Function to refill stock in the database
 def refill_stock_in_db(product_name, quantity):
     conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("UPDATE inventory SET stock = stock + %s WHERE product_name = %s", (quantity, product_name))
     conn.commit()
     conn.close()
-
-# Function to open inventory window
-def open_inventory_window():
-    global inventory_data
-    inventory_data = fetch_inventory_data()  # Fetch inventory data from MySQL
-    
-    # Create the inventory window
-    inventory_window = tk.Toplevel(root)
-    inventory_window.title("Inventory")
-    inventory_window.geometry("800x600")
-    inventory_window.configure(bg="#f0f8ff")  # Light blue background for aesthetics
-
-    # Title label
-    title_label = tk.Label(
-        inventory_window,
-        text="Inventory Overview",
-        font=("Helvetica", 24, "bold"),
-        bg="#f0f8ff",
-        fg="#333333",
-    )
-    title_label.pack(pady=20)
-
-    # Frame for table and buttons
-    table_frame = tk.Frame(inventory_window, bg="#ffffff")
-    table_frame.pack(pady=20, padx=30, fill="both", expand=True)
-
-    # Scrollable canvas for table
-    canvas = tk.Canvas(table_frame, bg="#ffffff")
-    scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=scrollbar.set)
-
-    scrollable_frame = tk.Frame(canvas, bg="#ffffff")
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.pack(side="left", fill="both", expand=True)
-    scrollbar.pack(side="right", fill="y")
-
-    scrollable_frame.bind(
-        "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
- # Add column headings
-    heading_font = ("Helvetica", 16, "bold")
-    tk.Label(scrollable_frame, text="Product", font=heading_font, bg="#ffffff").grid(row=0, column=0, padx=10, pady=10)
-    tk.Label(scrollable_frame, text="Stock Available", font=heading_font, bg="#ffffff").grid(row=0, column=1, padx=10, pady=10)
-    tk.Label(scrollable_frame, text="Price", font=heading_font, bg="#ffffff").grid(row=0, column=2, padx=10, pady=10)
-    tk.Label(scrollable_frame, text="Action", font=heading_font, bg="#ffffff").grid(row=0, column=3, padx=10, pady=10)
-
-     # Function to refill stock
-    def refill_stock(product_name, label):
-        quantity = askinteger("Refill Stock", f"Enter quantity to add for {product_name}:", minvalue=1)
-        if quantity is not None:
-            for item in inventory_data:
-                if item["product_name"] == product_name:
-                    item["stock"] += quantity
-                    label.config(text=str(item["stock"]))
-                    break
-            # Also update the database
-            current_price = next((item["price"] for item in inventory_data if item["product_name"] == product_name), 0)
-            add_items_to_stock(product_name, quantity, current_price)
-
-
-    # Populate table with product data and refill buttons
-    for idx, item in enumerate(inventory_data, start=1):
-        product = item["product_name"]
-        stock = item["stock"]
-        price = item["price"]
-        # Product column
-        tk.Label(scrollable_frame, text=product, font=("Helvetica", 14), bg="#ffffff").grid(row=idx, column=0, padx=10, pady=10)
-        # Stock column
-        stock_label = tk.Label(scrollable_frame, text=stock, font=("Helvetica", 14), bg="#ffffff")
-        stock_label.grid(row=idx, column=1, padx=10, pady=10)
-        # Price column
-        tk.Label(scrollable_frame, text=f"₹{price:.2f}", font=("Helvetica", 14), bg="#ffffff").grid(row=idx, column=2, padx=10, pady=10)
-        # Refill button
-        refill_button = tk.Button(
-            scrollable_frame,
-            text="Refill",
-            font=("Helvetica", 12),
-            bg="#4CAF50",
-            fg="white",
-            command=lambda p=product, lbl=stock_label: refill_stock(p, lbl),
-        )
-        refill_button.grid(row=idx, column=3, padx=10, pady=10)
-
-    # Close button
-    close_button = tk.Button(
-        inventory_window,
-        text="Close",
-        font=("Helvetica", 16),
-        bg="#f44336",
-        fg="white",
-        command=inventory_window.destroy,
-    )
-    close_button.pack(pady=10)
 
 
 def add_items_to_stock(item_name, quantity, price):
@@ -521,108 +73,765 @@ def add_items_to_stock(item_name, quantity, price):
         cursor.execute("INSERT INTO inventory (product_name, stock, price) VALUES (%s, %s, %s)", (item_name, quantity, price))
     conn.commit()
     conn.close()
-    global inventory_data
-    inventory_data = fetch_inventory_data()
 
-# Function to open the window for adding items to stock
-def add_items_to_stock_window():
-    global inventory_data
-    add_window = tk.Toplevel(root)
-    add_window.title("Add Items to Stock")
-    add_window.geometry("400x400")
-    add_window.configure(bg="#f0f8ff")
 
-    tk.Label(add_window, text="Add New Item to Stock", font=("Helvetica", 18, "bold"), bg="#f0f8ff").pack(pady=20)
+def reduce_stock_in_db(product_name, quantity):
+    conn = connect_db()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE inventory SET stock = stock - %s WHERE product_name = %s AND stock >= %s", (quantity, product_name, quantity))
+    conn.commit()
+    conn.close()
 
-    # Input fields for item name, quantity, and price
-    tk.Label(add_window, text="Item Name:", font=("Helvetica", 14), bg="#f0f8ff").pack(pady=5)
-    item_name_entry = tk.Entry(add_window, font=("Helvetica", 12))
-    item_name_entry.pack(pady=5)
 
-    tk.Label(add_window, text="Quantity:", font=("Helvetica", 14), bg="#f0f8ff").pack(pady=5)
-    quantity_entry = tk.Entry(add_window, font=("Helvetica", 12))
-    quantity_entry.pack(pady=5)
 
-    tk.Label(add_window, text="Price per Unit:", font=("Helvetica", 14), bg="#f0f8ff").pack(pady=5)
-    price_entry = tk.Entry(add_window, font=("Helvetica", 12))
-    price_entry.pack(pady=5)
 
-    # Function to add the item to the inventory
-    def add_item():
-        global inventory_data
-        item_name = item_name_entry.get()
-        quantity = quantity_entry.get()
-        price = price_entry.get()
-        if item_name and quantity and price:
+
+class CustomerInfoWindow:
+    def __init__(self, parent, bill_data, total_sum, cart):
+        self.parent = parent
+        self.bill_data = bill_data
+        self.total_sum = total_sum
+        self.cart = cart  # Store reference to cart
+        self.bill_saved = False  # Flag to track if bill was actually saved
+        
+        # Create customer info window
+        self.customer_window = tk.Toplevel(parent)
+        self.customer_window.title("Customer Information")
+        self.customer_window.geometry("600x650")
+        self.customer_window.configure(bg="#f0f8ff")
+        self.customer_window.resizable(False, False)
+        
+        # Center the window
+        self.customer_window.transient(parent)
+        self.customer_window.grab_set()
+        
+        # Title
+        title_label = tk.Label(self.customer_window, text="Customer Information", 
+                              font=("Helvetica", 18, "bold"), bg="#f0f8ff", fg="#333")
+        title_label.pack(pady=20)
+        
+        # Form frame
+        form_frame = tk.Frame(self.customer_window, bg="#f0f8ff")
+        form_frame.pack(pady=20, padx=30)
+        
+        # Customer Name
+        tk.Label(form_frame, text="Customer Name:", font=("Helvetica", 12), bg="#f0f8ff").pack(anchor="w")
+        self.name_entry = tk.Entry(form_frame, font=("Helvetica", 12), width=30)
+        self.name_entry.pack(pady=(5, 15), fill="x")
+        
+        # Customer Email (Optional)
+        tk.Label(form_frame, text="Customer Email:", font=("Helvetica", 12), bg="#f0f8ff").pack(anchor="w")
+        self.email_entry = tk.Entry(form_frame, font=("Helvetica", 12), width=30)
+        self.email_entry.pack(pady=(5, 15), fill="x")
+        
+        # Email Configuration (Optional)
+        tk.Label(form_frame, text="Store Email:", font=("Helvetica", 12), bg="#f0f8ff").pack(anchor="w")
+        self.store_email_entry = tk.Entry(form_frame, font=("Helvetica", 12), width=30)
+        self.store_email_entry.pack(pady=(5, 15), fill="x")
+        self.store_email_entry.insert(0, "mygrocer7@gmail.com")
+        
+        # Store Email Password (Optional)
+        tk.Label(form_frame, text="Store Email Password:", font=("Helvetica", 12), bg="#f0f8ff").pack(anchor="w")
+        self.store_password_entry = tk.Entry(form_frame, font=("Helvetica", 12), width=30, show="*")
+        self.store_password_entry.pack(pady=(5, 15), fill="x")
+        self.store_password_entry.insert(0, "gisiyfpijdvtkdcu")
+        
+        # Buttons
+        button_frame = tk.Frame(self.customer_window, bg="#f0f8ff")
+        button_frame.pack(pady=20)
+        
+        save_only_button = tk.Button(button_frame, text="Save Bill Only", font=("Helvetica", 12), 
+                                   bg="#2196F3", fg="white", command=self.save_bill_only)
+        save_only_button.pack(side="left", padx=(0, 10))
+        
+        send_and_save_button = tk.Button(button_frame, text="Send & Save Bill", font=("Helvetica", 12), 
+                                       bg="#4CAF50", fg="white", command=self.submit_and_send)
+        send_and_save_button.pack(side="left", padx=(0, 10))
+        
+        # Updated cancel button to use cancel_action method
+        cancel_button = tk.Button(button_frame, text="Cancel", font=("Helvetica", 12), 
+                                bg="#f44336", fg="white", command=self.cancel_action)
+        cancel_button.pack(side="left")
+
+    def cancel_action(self):
+        """Handle cancel button click - don't reduce stock"""
+        # Simply destroy the window without any side effects
+        self.customer_window.destroy()
+
+    def save_bill_only(self):
+        """Save bill without sending email"""
+        customer_name = self.name_entry.get().strip()
+        
+        if not customer_name:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Customer name is required!")
+            return
+        
+        try:
+            # Generate and save bill
+            bill_file_path = self.generate_and_save_bill(customer_name)
+            
+            # REDUCE STOCK ONLY WHEN BILL IS SAVED
+            self.reduce_stock_from_bill_data()
+            
+            # CLEAR CART ONLY WHEN BILL IS SAVED
+            self.clear_cart()
+            
+            # Show success message
+            from tkinter import messagebox
+            messagebox.showinfo("Success", f"Bill has been saved to your desktop!\nFile: {os.path.basename(bill_file_path)}")
+            
+            self.customer_window.destroy()
+            
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to save bill: {str(e)}")
+
+    def submit_and_send(self):
+        customer_name = self.name_entry.get().strip()
+        customer_email = self.email_entry.get().strip()
+        store_email = self.store_email_entry.get().strip()
+        store_password = self.store_password_entry.get().strip()
+
+        # Require all fields for sending email
+        if not customer_name or not customer_email or not store_email or not store_password:
+            from tkinter import messagebox
+            messagebox.showerror(
+                "Error",
+                "All fields are required to send the bill by email"
+            )
+            return
+
+        # Validate email format
+        if "@" not in customer_email or "." not in customer_email:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Please enter a valid customer email address!")
+            return
+
+        if "@" not in store_email or "." not in store_email:
+            from tkinter import messagebox
+            messagebox.showerror("Error", "Please enter a valid store email address!")
+            return
+
+        try:
+            # Generate and save bill
+            bill_file_path = self.generate_and_save_bill(customer_name)
+
+            # Send email
+            self.send_bill_email(customer_name, customer_email, store_email, store_password, bill_file_path)
+
+            # REDUCE STOCK ONLY WHEN BILL IS SENT
+            self.reduce_stock_from_bill_data()
+
+            # CLEAR CART ONLY WHEN BILL IS SENT
+            self.clear_cart()
+
+            # Show success message
+            from tkinter import messagebox
+            messagebox.showinfo("Success", f"Bill has been sent to {customer_email} and saved to your desktop!")
+
+            self.customer_window.destroy()
+
+        except Exception as e:
+            from tkinter import messagebox
+            messagebox.showerror("Error", f"Failed to send bill: {str(e)}")
+
+    def generate_and_save_bill(self, customer_name):
+        """Generate bill PDF and  ask user for location"""
+        from reportlab.lib.pagesizes import letter
+        from reportlab.pdfgen import canvas as pdf_canvas
+        from reportlab.lib import colors
+        from tkinter import filedialog, messagebox
+
+    
+        filename = f"MyGrocer_Bill_{customer_name}.pdf"
+
+        
+        file_path = filedialog.asksaveasfilename(
+                defaultextension=".pdf",
+                filetypes=[("PDF files", "*.pdf")],
+                initialfile=filename,
+                title="Save Bill As"
+            )
+        if not file_path:
+                raise Exception("No location selected for saving the bill.")
+
+        # Create PDF
+        c = pdf_canvas.Canvas(file_path, pagesize=letter)
+        width, height = letter
+
+        # Header
+        c.setFillColor(colors.lightgrey)
+        c.rect(0, height-120, width, 120, fill=True)
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 36)
+        c.drawString(50, height-50, "MyGrocer")
+        c.setStrokeColor(colors.darkblue)
+        c.setLineWidth(2)
+        c.line(50, height-60, width-50, height-60)
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 24)
+        c.drawString(50, height-100, "INVOICE")
+        current_date = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+        c.setFont("Helvetica", 12)
+        c.drawString(width-200, height-100, f"Date: {current_date}")
+
+        # Customer info
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(50, height-140, f"Customer Name: {customer_name}")
+
+        # Bill content
+        items_count = len(self.bill_data)
+        field_height = max(400, items_count * 25 + 150)
+        item_x = 70
+        qty_x = 250
+        price_x = 380
+        total_x = 480
+        total_page_height = height
+        header_height = 160  # Increased for customer info
+        footer_height = 150
+        available_height = total_page_height - header_height - footer_height
+        field_start_y = height - header_height - 50 - ((available_height - field_height) / 2)
+        c.setFillColor(colors.lightgrey)
+        c.rect(50, field_start_y-field_height, width-100, field_height, fill=True)
+        c.setStrokeColor(colors.grey)
+        c.setLineWidth(1)
+        c.rect(50, field_start_y-field_height, width-100, field_height, stroke=True)
+        y = field_start_y - 40
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(item_x, y, "Item")
+        c.drawString(qty_x, y, "Quantity")
+        c.drawString(price_x, y, "Price(Rs)")
+        c.drawString(total_x, y, "Total(Rs)")
+        y -= 10
+        c.line(70, y, width-70, y)
+        y -= 25
+        c.setFont("Helvetica", 12)
+        for line in self.bill_data:
+            parts = line.split("\t")
+            if len(parts) == 4:
+                item = parts[0].strip()
+                qty = parts[1].strip()
+                price = parts[2].replace('₹', '').replace('', '').strip()
+                total = parts[3].replace('₹', '').replace('', '').strip()
+                c.drawString(item_x, y, item)
+                c.drawRightString(qty_x + 80, y, qty)
+                price_text = f"{price}"
+                c.drawRightString(price_x + 80, y, price_text)
+                total_text = f"{total}"
+                c.drawRightString(total_x + 60, y, total_text)
+                y -= 25
+        y -= 10
+        c.setStrokeColor(colors.black)
+        c.line(70, y, width-70, y)
+        y -= 30
+        c.setFont("Helvetica-Bold", 14)
+        c.drawString(item_x, y, "Grand Total(Rs):")
+        grand_total_text = f"{self.total_sum:.2f}"
+        c.drawRightString(total_x + 60, y, grand_total_text)
+        y = 100
+        c.setFillColor(colors.black)
+        c.setFont("Helvetica", 12)
+        c.drawString(50, y, "Mode of Payment: UPI")
+        y -= 20
+        c.drawString(50, y, "Thanks for Visiting!")
+        y -= 20
+        c.drawString(50, y, "Store Address: Diwan Mohalla, Sarvoday Colony, Patna, Bihar")
+        y -= 20
+        c.drawString(50, y, "MyGrocer")
+        c.save()
+        return file_path
+
+    def send_bill_email(self, customer_name, customer_email, store_email, store_password, bill_file_path):
+        """Send bill PDF via email"""
+        # Email configuration
+        smtp_server = "smtp.gmail.com"
+        smtp_port = 587
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = store_email
+        msg['To'] = customer_email
+        msg['Subject'] = f"Your Grocery Bill from MyGrocer - {datetime.now().strftime('%d-%m-%Y')}"
+        
+        # Email body
+        body = f"""
+Dear {customer_name},
+
+Thank you for shopping with MyGrocer!
+
+Please find attached your grocery bill for today's purchase.
+
+Bill Details:
+- Date: {datetime.now().strftime('%d-%m-%Y %H:%M')}
+- Total Amount: ₹{self.total_sum:.2f}
+
+If you have any queries regarding bill, feel free to reach us.
+
+Best regards,
+MyGrocer Team
+Store Address: Diwan Mohalla, Sarvoday Colony, Patna, Bihar
+        """
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        # Attach PDF
+        with open(bill_file_path, "rb") as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+        
+        encoders.encode_base64(part)
+        part.add_header(
+            'Content-Disposition',
+            f'attachment; filename= {os.path.basename(bill_file_path)}'
+        )
+        msg.attach(part)
+        
+        # Send email
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(store_email, store_password)
+        text = msg.as_string()
+        server.sendmail(store_email, customer_email, text)
+        server.quit()
+
+    def reduce_stock_from_bill_data(self):
+        """Reduce stock in database based on bill data"""
+        for line in self.bill_data:
+            parts = line.split("\t")
+            if len(parts) == 4:
+                product_name = parts[0].strip()
+                quantity = int(parts[1].strip())
+                reduce_stock_in_db(product_name, quantity)
+
+    def clear_cart(self):
+        """Clear the cart after successful bill creation"""
+        if self.cart:
+            for item in self.cart.get_children():
+                self.cart.delete(item)
+
+
+class MyGrocerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("MyGrocer")
+        
+        # Get screen dimensions
+        screen_width = root.winfo_screenwidth()
+        screen_height = root.winfo_screenheight()
+        self.root.geometry(f"{screen_width}x{screen_height}")
+        self.root.configure(bg="#f0f8ff")
+        
+        # Create main container
+        self.main_container = tk.Frame(root)
+        self.main_container.pack(fill="both", expand=True)
+        
+        # Initialize variables
+        self.cart = None
+        self.inventory_data = fetch_inventory_data()
+        
+        # Show welcome screen
+        self.show_welcome_screen()
+        
+        # Create database tables
+        create_inventory_table()
+    
+        
+
+    def clear_main_container(self):
+        """Clear all widgets from main container"""
+        for widget in self.main_container.winfo_children():
+            widget.destroy()
+
+    def show_welcome_screen(self):
+        """Show the welcome screen"""
+        self.clear_main_container()
+        
+        # Load and resize background image
+        try:
+            background_image = Image.open(r"C:/GMS/latest groc/grocery_store.jpg")
+            background_image = background_image.resize((self.root.winfo_screenwidth(), self.root.winfo_screenheight()))
+            self.background_image_tk = ImageTk.PhotoImage(background_image)
+            
+            # Create canvas for background
+            canvas = tk.Canvas(self.main_container, width=self.root.winfo_screenwidth(), height=self.root.winfo_screenheight())
+            canvas.pack(fill="both", expand=True)
+            canvas.create_image(0, 0, image=self.background_image_tk, anchor="nw")
+            
+            # Welcome label
+            welcome_label = tk.Label(canvas, text="Welcome to MyGrocer", font=("Algerian", 50, "bold"), bg="white", fg="black")
+            canvas.create_window(self.root.winfo_screenwidth() // 2, 80, window=welcome_label)
+            
+            # Get Started button
+            get_started_button = tk.Button(canvas, text="Get Started", font=("Algerian", 30), borderwidth=10, 
+                                         command=self.show_options_screen)
+            canvas.create_window(self.root.winfo_screenwidth() // 2, 400, window=get_started_button)
+            
+        except Exception as e:
+            # Fallback if image not found
+            welcome_label = tk.Label(self.main_container, text="Welcome to MyGrocer", font=("Algerian", 50, "bold"), 
+                                   bg="#f0f8ff", fg="black")
+            welcome_label.pack(pady=100)
+            
+            get_started_button = tk.Button(self.main_container, text="Get Started", font=("Algerian", 30), 
+                                         borderwidth=10, command=self.show_options_screen)
+            get_started_button.pack(pady=50)
+
+    def show_options_screen(self):
+        """Show the options screen"""
+        self.clear_main_container()
+        
+        # Load background image
+        try:
+            background_image = Image.open(r"C:/GMS/latest groc/grocery_store.jpg")
+            background_image = background_image.resize((self.root.winfo_screenwidth(), self.root.winfo_screenheight()))
+            self.background_image_tk = ImageTk.PhotoImage(background_image)
+            
+            canvas = tk.Canvas(self.main_container, width=self.root.winfo_screenwidth(), height=self.root.winfo_screenheight())
+            canvas.pack(fill="both", expand=True)
+            canvas.create_image(0, 0, image=self.background_image_tk, anchor="nw")
+            
+            # Back button
+            back_button = tk.Button(canvas, text="← Back", font=("Arial", 16), bg="#EC0000", fg="white",
+                                  command=self.show_welcome_screen)
+            canvas.create_window(100, 50, window=back_button)
+            
+            # Option buttons
+            generate_bill_button = tk.Button(canvas, text="GENERATE BILL", font=("Algerian", 30), 
+                                           bg="#FFFFFF", fg="black", width=30, borderwidth=10,
+                                           command=self.show_bill_screen)
+            canvas.create_window(self.root.winfo_screenwidth() // 2, 300, window=generate_bill_button)
+            
+            inventory_button = tk.Button(canvas, text="OPEN INVENTORY", font=("Algerian", 30), 
+                                       bg="#FFFFFF", fg="black", width=30, borderwidth=10,
+                                       command=self.show_inventory_screen)
+            canvas.create_window(self.root.winfo_screenwidth() // 2, 450, window=inventory_button)
+            
+            add_button = tk.Button(canvas, text="ADD NEW ITEM TO INVENTORY", font=("Algerian", 30), 
+                                 bg="#FFFFFF", fg="black", width=30, borderwidth=10,
+                                 command=self.show_add_item_screen)
+            canvas.create_window(self.root.winfo_screenwidth() // 2, 600, window=add_button)
+            
+        except Exception as e:
+            # Fallback without image
+            back_button = tk.Button(self.main_container, text="← Back", font=("Arial", 16), 
+                                  bg="#4CAF50", fg="white", command=self.show_welcome_screen)
+            back_button.pack(anchor="nw", padx=20, pady=20)
+            
+            generate_bill_button = tk.Button(self.main_container, text="GENERATE BILL", font=("Algerian", 30), 
+                                           bg="#FFFFFF", fg="black", width=30, borderwidth=10,
+                                           command=self.show_bill_screen)
+            generate_bill_button.pack(pady=50)
+            
+            inventory_button = tk.Button(self.main_container, text="OPEN INVENTORY", font=("Algerian", 30), 
+                                       bg="#FFFFFF", fg="black", width=30, borderwidth=10,
+                                       command=self.show_inventory_screen)
+            inventory_button.pack(pady=50)
+            
+            add_button = tk.Button(self.main_container, text="ADD NEW ITEM TO INVENTORY", font=("Algerian", 30), 
+                                 bg="#FFFFFF", fg="black", width=30, borderwidth=10,
+                                 command=self.show_add_item_screen)
+            add_button.pack(pady=50)
+
+    def show_bill_screen(self):
+        """Show the bill generation screen"""
+        self.clear_main_container()
+        
+        # Create bill interface
+        title_label = tk.Label(self.main_container, text="Grocery Billing", font=("Arial", 30, "bold"), 
+                              bg="#f8f8f8", fg="#333")
+        title_label.pack(pady=20)
+        
+        # Back button
+        back_button = tk.Button(self.main_container, text="← Back to Options", font=("Arial", 16), 
+                              bg="#EC0000", fg="white", command=self.show_options_screen)
+        back_button.pack(anchor="nw", padx=20, pady=10)
+        
+        # Interface frame
+        interface_frame = tk.Frame(self.main_container, bg="#fefefe", relief="groove", bd=2)
+        interface_frame.pack(pady=20, padx=20, fill="both", expand=True)
+        
+        # Labels
+        tk.Label(interface_frame, text="SELECT ITEM", font=("Helvetica", 16), bg="#fefefe").grid(row=0, column=0, padx=10, pady=10)
+        tk.Label(interface_frame, text="Quantity(Kg/Unit)", font=("Helvetica", 16), bg="#fefefe").grid(row=0, column=1, padx=10, pady=10)
+        tk.Label(interface_frame, text="Price (per Kg/Unit)", font=("Helvetica", 16), bg="#fefefe").grid(row=0, column=2, padx=10, pady=10)
+        
+        # Get inventory data
+        inventory_names = [item['product_name'] for item in self.inventory_data]
+        
+        # Item selection
+        item_name_var = tk.StringVar()
+        item_name_combobox = ttk.Combobox(interface_frame, textvariable=item_name_var, values=inventory_names, 
+                                         font=("Helvetica", 14), width=18, state="readonly")
+        item_name_combobox.grid(row=1, column=0, padx=10, pady=10)
+        
+        # Quantity
+        quantity_var = tk.StringVar(value="1")
+        quantity_spinbox = ttk.Spinbox(interface_frame, from_=1, to=999, textvariable=quantity_var, 
+                                     width=8, font=("Helvetica", 14))
+        quantity_spinbox.grid(row=1, column=1, padx=10, pady=10)
+        
+        # Price entry
+        price_entry = tk.Entry(interface_frame, font=("Helvetica", 14), borderwidth=5, width=10, state="readonly")
+        price_entry.grid(row=1, column=2, padx=10, pady=10)
+        
+        # Item selection handler
+        def on_item_selected(event):
+            selected_item = item_name_var.get()
+            for item in self.inventory_data:
+                if item['product_name'] == selected_item:
+                    price_entry.config(state="normal")
+                    price_entry.delete(0, tk.END)
+                    price_entry.insert(0, str(item['price']))
+                    price_entry.config(state="readonly")
+                    break
+        item_name_combobox.bind("<<ComboboxSelected>>", on_item_selected)
+        
+        # Add to cart function
+        def add_to_cart():
             try:
-                quantity = int(quantity)
-                price = float(price)
-                add_items_to_stock(item_name, quantity, price)  # Update database
-                # No need to append to inventory_data here, as it is refreshed from DB
-                tk.Label(
-                    add_window,
-                    text=f"Added: {item_name} (Quantity: {quantity}, Price: ₹{price:.2f})",
-                    font=("Helvetica", 12),
-                    bg="#f0f8ff",
-                ).pack(pady=5)
-                # Clear input fields
-                item_name_entry.delete(0, tk.END)
-                quantity_entry.delete(0, tk.END)
-                price_entry.delete(0, tk.END)
-            except ValueError:
-                tk.Label(add_window, text="Invalid input! Try again.", font=("Helvetica", 12), fg="red", bg="#f0f8ff").pack(pady=5)
-        else:
-            tk.Label(add_window, text="All fields are required!", font=("Helvetica", 12), fg="red", bg="#f0f8ff").pack(pady=5)
+                item = item_name_var.get()
+                quantity = quantity_var.get()
+                price_entry.config(state="normal")
+                price = price_entry.get()
+                price_entry.config(state="readonly")
 
-    # Frame for Add and Close buttons side by side
-    button_frame = tk.Frame(add_window, bg="#f0f8ff")
-    button_frame.pack(pady=20)
+                if item and quantity and price:
+                    try:
+                        quantity = int(quantity)
+                        price = float(price)
+                        
+                        # Check available stock
+                        available_stock = None
+                        for inv_item in self.inventory_data:
+                            if inv_item['product_name'] == item:
+                                available_stock = inv_item['stock']
+                                break
 
-    # Add item button
-    add_button = tk.Button(
-        button_frame, text="Add Item", font=("Helvetica", 14), bg="#4CAF50", fg="white", command=add_item
-    )
-    add_button.pack(side="left", padx=(0, 0))
+                        # Calculate current quantity in cart
+                        current_cart_qty = 0
+                        for cart_item in self.cart.get_children():
+                            values = self.cart.item(cart_item, "values")
+                            if values[0] == item:
+                                current_cart_qty += int(values[1])
 
-    # Close button
-    close_button = tk.Button(
-        button_frame, text="Close", font=("Helvetica", 14), bg="#f44336", fg="white", command=add_window.destroy
-    )
-    close_button.pack(side="left", padx=(0, 0))
+                        if available_stock is not None and (quantity + current_cart_qty) > available_stock:
+                            from tkinter import messagebox
+                            messagebox.showwarning("Not enough items", "Not enough items available in Inventory.")
+                            return
 
+                        # Check if item already in cart
+                        found = False
+                        for cart_item in self.cart.get_children():
+                            values = self.cart.item(cart_item, "values")
+                            if values[0] == item:
+                                new_qty = int(values[1]) + quantity
+                                new_total = new_qty * price
+                                self.cart.item(cart_item, values=(item, new_qty, price, new_total))
+                                found = True
+                                break
+                        if not found:
+                            total_price = quantity * price
+                            self.cart.insert("", "end", values=(item, quantity, price, total_price))
 
+                        item_name_combobox.set("")
+                        quantity_var.set("1")
+                        price_entry.config(state="normal")
+                        price_entry.delete(0, tk.END)
+                        price_entry.config(state="readonly")
+                    except ValueError:
+                        print("Invalid quantity or price entered.")
+            except Exception as e:
+                from tkinter import messagebox
+                messagebox.showerror("Error", str(e))
 
+        add_to_cart_button = tk.Button(interface_frame, text="Add to Cart", font=("Helvetica", 14), command=add_to_cart)
+        add_to_cart_button.grid(row=1, column=3, padx=10, pady=10)
+        
+        # Cart display
+        cart_label = tk.Label(interface_frame, text="Cart", font=("Algerian", 30, "bold"), bg="#fefefe")
+        cart_label.grid(row=2, column=0, columnspan=4, pady=10)
+        
+        # Cart treeview
+        self.cart = ttk.Treeview(interface_frame, columns=("Item", "Quantity(Unit/Kg)", "Price", "Total"), 
+                                show="headings", height=15)
+        self.cart.heading("Item", text="Item")
+        self.cart.heading("Quantity(Unit/Kg)", text="Quantity(Unit/Kg)")
+        self.cart.heading("Price", text="Price (per Unit/Kg)")
+        self.cart.heading("Total", text="Total Price")
+        
+        self.cart.column("Item", width=250, anchor="w")
+        self.cart.column("Quantity(Unit/Kg)", width=200, anchor="center")
+        self.cart.column("Price", width=200, anchor="e")
+        self.cart.column("Total", width=200, anchor="e")
+        self.cart.grid(row=3, column=0, columnspan=4, padx=10, pady=10)
+        
+        # Create bill function
+        def create_bill():
+            if not self.cart.get_children():
+                from tkinter import messagebox
+                messagebox.showwarning("Empty Bill", "Bill cannot be empty. Add some items to proceed.")
+                return
+            
+            # Prepare bill data
+            total_sum = 0
+            bill_lines = []
+            for item in self.cart.get_children():
+                values = self.cart.item(item, "values")
+                total_sum += float(values[3])
+                bill_lines.append(f"{values[0]}\t{values[1]}\t₹{values[2]}\t₹{values[3]}")
+            
+            # Open customer info window - DON'T CLEAR CART YET
+            CustomerInfoWindow(self.root, bill_lines, total_sum, self.cart)
+            
+            # REMOVED: Cart clearing - will be done only when bill is saved/sent
 
-# Main window
-root = tk.Tk()
-root.title("MyGrocer")
-screen_width = root.winfo_screenwidth()
-screen_height = root.winfo_screenheight()
-root.geometry(f"{screen_width}x{screen_height}")
+        # Create bill button
+        create_bill_button = tk.Button(interface_frame, text="Create Bill", font=("Helvetica", 16), 
+                                     bg="#4CAF50", fg="white", command=create_bill)
+        create_bill_button.grid(row=4, column=1, pady=10, padx=(0, 5))
 
-root.configure(bg="#f0f8ff")
+    def show_inventory_screen(self):
+        """Show the inventory screen"""
+        self.clear_main_container()
+        
+        title_label = tk.Label(self.main_container, text="Inventory Overview", font=("Helvetica", 24, "bold"), 
+                              bg="#f0f8ff", fg="#333333")
+        title_label.pack(pady=20)
+        
+        # Back button
+        back_button = tk.Button(self.main_container, text="← Back to Options", font=("Arial", 16), 
+                              bg="#EC0000", fg="white", command=self.show_options_screen)
+        back_button.pack(anchor="nw", padx=20, pady=10)
+        
+        # Refresh inventory data
+        self.inventory_data = fetch_inventory_data()
+        
+        table_frame = tk.Frame(self.main_container, bg="#ffffff")
+        table_frame.pack(pady=20, padx=30, fill="both", expand=True)
+        
+        canvas = tk.Canvas(table_frame, bg="#ffffff")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scrollable_frame = tk.Frame(canvas, bg="#ffffff")
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        
+        heading_font = ("Helvetica", 16, "bold")
+        tk.Label(scrollable_frame, text="Product", font=heading_font, bg="#ffffff").grid(row=0, column=0, padx=10, pady=10)
+        tk.Label(scrollable_frame, text="Stock Available", font=heading_font, bg="#ffffff").grid(row=0, column=1, padx=10, pady=10)
+        tk.Label(scrollable_frame, text="Price", font=heading_font, bg="#ffffff").grid(row=0, column=2, padx=10, pady=10)
+        tk.Label(scrollable_frame, text="Action", font=heading_font, bg="#ffffff").grid(row=0, column=3, padx=10, pady=10)
+        
+        def refill_stock(product_name, label):
+            quantity = askinteger("Refill Stock", f"Enter quantity to add for {product_name}:", minvalue=1)
+            if quantity is not None:
+                for item in self.inventory_data:
+                    if item["product_name"] == product_name:
+                        item["stock"] += quantity
+                        label.config(text=str(item["stock"]))
+                        break
+                
+                current_price = next((item["price"] for item in self.inventory_data if item["product_name"] == product_name), 0)
+                add_items_to_stock(product_name, quantity, current_price)
+        
+        for idx, item in enumerate(self.inventory_data, start=1):
+            product = item["product_name"]
+            stock = item["stock"]
+            price = item["price"]
+            
+            tk.Label(scrollable_frame, text=product, font=("Helvetica", 14), bg="#ffffff").grid(row=idx, column=0, padx=10, pady=10)
+            
+            stock_label = tk.Label(scrollable_frame, text=stock, font=("Helvetica", 14), bg="#ffffff")
+            stock_label.grid(row=idx, column=1, padx=10, pady=10)
+            
+            tk.Label(scrollable_frame, text=f"₹{price:.2f}", font=("Helvetica", 14), bg="#ffffff").grid(row=idx, column=2, padx=10, pady=10)
+            
+            refill_button = tk.Button(scrollable_frame, text="Refill", font=("Helvetica", 12), 
+                                    bg="#4CAF50", fg="white", 
+                                    command=lambda p=product, lbl=stock_label: refill_stock(p, lbl))
+            refill_button.grid(row=idx, column=3, padx=10, pady=10)
 
-# Create the database table on program start
-create_inventory_table()
+    def show_add_item_screen(self):
+        """Show the add item screen"""
+        self.clear_main_container()
+        
+        title_label = tk.Label(self.main_container, text="Add New Item to Stock", font=("Helvetica", 18, "bold"), 
+                              bg="#f0f8ff")
+        title_label.pack(pady=20)
+        
+        # Back button
+        back_button = tk.Button(self.main_container, text="← Back to Options", font=("Arial", 16), 
+                              bg="#EC0000", fg="white", command=self.show_options_screen)
+        back_button.pack(anchor="nw", padx=20, pady=10)
+        
+        # Form frame
+        form_frame = tk.Frame(self.main_container, bg="#f0f8ff")
+        form_frame.pack(pady=20)
+        
+        tk.Label(form_frame, text="Item Name:", font=("Helvetica", 14), bg="#f0f8ff").pack(pady=5)
+        item_name_entry = tk.Entry(form_frame, font=("Helvetica", 12))
+        item_name_entry.pack(pady=5)
+        
+        tk.Label(form_frame, text="Quantity:", font=("Helvetica", 14), bg="#f0f8ff").pack(pady=5)
+        quantity_entry = tk.Entry(form_frame, font=("Helvetica", 12))
+        quantity_entry.pack(pady=5)
+        
+        tk.Label(form_frame, text="Price per Unit:", font=("Helvetica", 14), bg="#f0f8ff").pack(pady=5)
+        price_entry = tk.Entry(form_frame, font=("Helvetica", 12))
+        price_entry.pack(pady=5)
+        
+        def add_item():
+            item_name = item_name_entry.get()
+            quantity = quantity_entry.get()
+            price = price_entry.get()
+            if item_name and quantity and price:
+                try:
+                    quantity = int(quantity)
+                    price = float(price)
+                    add_items_to_stock(item_name, quantity, price)
+                    
+                    # Refresh inventory data
+                    self.inventory_data = fetch_inventory_data()
+                    
+                    # Show success message
+                    success_label = tk.Label(form_frame, text=f"Added: {item_name} (Quantity: {quantity}, Price: ₹{price:.2f})", 
+                                           font=("Helvetica", 12), bg="#f0f8ff", fg="green")
+                    success_label.pack(pady=5)
+                    
+                    # Clear entries
+                    item_name_entry.delete(0, tk.END)
+                    quantity_entry.delete(0, tk.END)
+                    price_entry.delete(0, tk.END)
+                    
+                    # Remove success message after 3 seconds
+                    self.root.after(3000, success_label.destroy)
+                    
+                except ValueError:
+                    error_label = tk.Label(form_frame, text="Invalid input! Try again.", font=("Helvetica", 12), 
+                                         fg="red", bg="#f0f8ff")
+                    error_label.pack(pady=5)
+                    self.root.after(3000, error_label.destroy)
+            else:
+                error_label = tk.Label(form_frame, text="All fields are required!", font=("Helvetica", 12), 
+                                     fg="red", bg="#f0f8ff")
+                error_label.pack(pady=5)
+                self.root.after(3000, error_label.destroy)
+        
+        button_frame = tk.Frame(self.main_container, bg="#f0f8ff")
+        button_frame.pack(pady=20)
+        
+        add_button = tk.Button(button_frame, text="Add Item", font=("Helvetica", 14), 
+                             bg="#4CAF50", fg="white", command=add_item)
+        add_button.pack(side="left", padx=(0, 10))
 
-
-# Background image for main window
-background_image = Image.open(r"C:/GMS/latest groc/grocery_store.jpg")
-background_image = background_image.resize((screen_width, screen_height))
-background_image_tk = ImageTk.PhotoImage(background_image)
-
-canvas = tk.Canvas(root, width=screen_width, height=screen_height)
-canvas.pack(fill="both", expand=True)
-canvas.create_image(0, 0, image=background_image_tk, anchor="nw")
-
-welcome_label = tk.Label(root, text="Welcome to MyGrocer", font=("Algerian", 50, "bold"), bg="white", fg="black")
-canvas.create_window(screen_width // 2, 80, window=welcome_label)
-
-get_started_button = tk.Button(root, text="Get Started", font=("Algerian", 30),borderwidth=10, command=open_new_window)
-canvas.create_window(screen_width // 2, 400, window=get_started_button)
-
-
-
-
-# Run the application
-root.mainloop()
+# Main execution
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = MyGrocerApp(root)
+    root.mainloop()
